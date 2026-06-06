@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apache Spark Architecture Simulator</title>
+    <style>
+        :root {
+            --bg-color: #0f1115;
+            --panel-bg: rgba(255, 255, 255, 0.03);
+            --panel-border: rgba(255, 255, 255, 0.1);
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --success: #10b981;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #dashboard {
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--panel-border);
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .input-block {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        select, input[type="range"] {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--panel-border);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            outline: none;
+            font-size: 13px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        button:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--text-muted);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #active-btn {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="dashboard">
+        <div class="control-group">
+            <div class="input-block">
+                <label>Data Volume</label>
+                <select id="vol-select" onchange="resetSim()">
+                    <option value="20">Low (20)</option>
+                    <option value="50" selected>Medium (50)</option>
+                    <option value="100">High (100)</option>
+                </select>
+            </div>
+            <div class="input-block">
+                <label>Skewness</label>
+                <select id="skew-select">
+                    <option value="off" selected>Low (Even)</option>
+                    <option value="on">High (Data Skew)</option>
+                </select>
+            </div>
+            <div class="input-block">
+                <label>M. Nodes (<span id="mnode-val">3</span>)</label>
+                <input type="range" id="mnode-slider" min="1" max="5" value="3" oninput="updateNodes()">
+            </div>
+        </div>
+
+        <div class="btn-group">
+            <button id="btn-1" onclick="triggerStep(1)">1. Load / Read</button>
+            <button id="btn-2" onclick="triggerStep(2)" disabled>2. Process</button>
+            <button id="btn-3" onclick="triggerStep(3)" disabled>3. Write (DLT)</button>
+            <button id="btn-4" onclick="triggerStep(4)" disabled>4. GC Recover</button>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="simCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        let particles = [];
+        let truck = { x: 0, y: 0, state: 'idle', capacity: 0, loaded: 0 };
+        let activeStep = 0;
+        let ramLoad = 0;
+        let mNodesCount = 3;
+
+        // Colors
+        const cols = {
+            bg: '#0f1115', boxBg: 'rgba(255,255,255,0.03)', boxBorder: 'rgba(255,255,255,0.15)',
+            text: '#94a3b8', source: '#f59e0b', process: '#3b82f6', write: '#10b981', waste: '#ef4444'
+        };
+
+        // Layout Geometry
+        let geo = {};
+
+        function resize() {
+            width = canvas.width = canvas.parentElement.clientWidth;
+            height = canvas.height = canvas.parentElement.clientHeight;
+            
+            const cx = width / 2;
+            geo = {
+                cloudSrc: { x: cx - 300, y: 80, w: 120, h: 60, label: 'Source Cloud' },
+                cloudDst: { x: cx + 300, y: 80, w: 120, h: 60, label: 'Destination Cloud' },
+                ram: { x: cx, y: 200, w: 400, h: 60, label: 'System RAM' },
+                gcNode: { x: cx - 400, y: height - 100, w: 100, h: 50, label: 'GC Area' },
+                mNodes: [], wNodes: [],
+                truckPath: { startX: cx + 300, startY: height - 100, endY: 120 }
+            };
+
+            truck.x = geo.truckPath.startX;
+            truck.y = geo.truckPath.startY;
+            updateNodes();
+        }
+
+        function updateNodes() {
+            mNodesCount = parseInt(document.getElementById('mnode-slider').value);
+            document.getElementById('mnode-val').innerText = mNodesCount;
+            
+            geo.mNodes = [];
+            geo.wNodes = [];
+            
+            const spacing = 150;
+            const startX = (width / 2) - ((mNodesCount - 1) * spacing) / 2;
+            
+            for(let i=0; i<mNodesCount; i++) {
+                let nx = startX + (i * spacing);
+                geo.mNodes.push({ x: nx, y: 350, w: 100, h: 50, label: `M. Node ${i+1}`, load: 0 });
+                geo.wNodes.push({ x: nx, y: 480, w: 100, h: 70, label: `Executor ${i+1}`, load: 0 });
+            }
+            if(activeStep === 0) draw();
+        }
+
+        function resetSim() {
+            particles = [];
+            ramLoad = 0;
+            truck.state = 'idle';
+            truck.loaded = 0;
+            truck.y = geo.truckPath.startY;
+            activeStep = 0;
+            geo.mNodes.forEach(n => n.load = 0);
+            geo.wNodes.forEach(n => n.load = 0);
+            updateButtons();
+            draw();
+        }
+
+        function updateButtons() {
+            [1,2,3,4].forEach(i => {
+                let btn = document.getElementById(`btn-${i}`);
+                btn.disabled = (i !== activeStep + 1 && !(activeStep === 4 && i === 1));
+                btn.style.background = (i === activeStep) ? cols.boxBorder : '';
+            });
+        }
+
+        // Particle logic
+        function createParticles() {
+            const vol = parseInt(document.getElementById('vol-select').value);
+            particles = [];
+            for(let i=0; i<vol; i++) {
+                particles.push({
+                    x: geo.cloudSrc.x + (Math.random()*60 - 30),
+                    y: geo.cloudSrc.y + (Math.random()*30 - 15),
+                    targetX: geo.ram.x + (Math.random()*380 - 190),
+                    targetY: geo.ram.y + (Math.random()*40 - 20),
+                    color: cols.source,
+                    type: 'data',
+                    state: 'moving_to_ram',
+                    speed: 0.02 + Math.random() * 0.03
+                });
+            }
+        }
+
+        function triggerStep(step) {
+            activeStep = step;
+            updateButtons();
+            
+            if (step === 1) {
+                resetSim();
+                activeStep = 1; updateButtons();
+                createParticles();
+            } 
+            else if (step === 2) {
+                const isSkew = document.getElementById('skew-select').value === 'on';
+                particles.forEach((p, i) => {
+                    p.color = cols.process;
+                    p.state = 'moving_to_node';
+                    p.progress = 0;
+                    
+                    // Skew Logic: 80% go to Node 0 if Skew is ON
+                    let nodeIndex = 0;
+                    if (isSkew) {
+                        nodeIndex = Math.random() < 0.8 ? 0 : Math.floor(Math.random() * (mNodesCount - 1)) + 1;
+                    } else {
+                        nodeIndex = i % mNodesCount;
+                    }
+                    if(nodeIndex >= mNodesCount) nodeIndex = mNodesCount - 1;
+
+                    p.targetX = geo.wNodes[nodeIndex].x + (Math.random()*80 - 40);
+                    p.targetY = geo.wNodes[nodeIndex].y + (Math.random()*50 - 25);
+                    p.assignedNode = nodeIndex;
+                });
+            }
+            else if (step === 3) {
+                truck.state = 'waiting';
+                truck.capacity = Math.floor(particles.length * 0.8); // 80% becomes DLT
+                
+                particles.forEach((p, i) => {
+                    p.progress = 0;
+                    if (i < truck.capacity) {
+                        p.type = 'file';
+                        p.color = cols.write;
+                        p.state = 'moving_to_truck';
+                        p.targetX = truck.x + (Math.random()*60 - 30);
+                        p.targetY = truck.y + (Math.random()*20 - 10);
+                    } else {
+                        p.type = 'waste';
+                        p.color = cols.waste;
+                        p.state = 'idle_waste';
+                    }
+                });
+            }
+            else if (step === 4) {
+                particles.forEach((p) => {
+                    if (p.type === 'waste') {
+                        p.state = 'moving_to_gc';
+                        p.progress = 0;
+                        p.targetX = geo.gcNode.x + (Math.random()*80 - 40);
+                        p.targetY = geo.gcNode.y + (Math.random()*30 - 15);
+                    }
+                });
+            }
+        }
+
+        // Animation Loop
+        function animate() {
+            updatePhysics();
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        function lerp(start, end, amt) {
+            return (1 - amt) * start + amt * end;
+        }
+
+        function updatePhysics() {
+            let moving = false;
+
+            particles.forEach(p => {
+                if (p.state.startsWith('moving')) {
+                    moving = true;
+                    if (p.progress === undefined) p.progress = 0;
+                    p.progress += p.speed;
+                    
+                    if (p.progress >= 1) {
+                        p.progress = 1;
+                        p.x = p.targetX; p.y = p.targetY;
+                        
+                        // State transitions
+                        if (p.state === 'moving_to_ram') {
+                            p.state = 'in_ram';
+                            ramLoad = Math.min(100, ramLoad + (100 / document.getElementById('vol-select').value));
+                        }
+                        if (p.state === 'moving_to_node') {
+                            p.state = 'in_node';
+                            geo.wNodes[p.assignedNode].load++;
+                        }
+                        if (p.state === 'moving_to_truck') {
+                            p.state = 'in_truck';
+                            truck.loaded++;
+                            if (truck.loaded >= truck.capacity && truck.state === 'waiting') {
+                                truck.state = 'driving_up';
+                            }
+                        }
+                        if (p.state === 'moving_to_gc') {
+                            p.state = 'moving_to_ram_recovery';
+                            p.progress = 0;
+                            p.targetX = geo.ram.x + (Math.random()*380 - 190);
+                            p.targetY = geo.ram.y + (Math.random()*40 - 20);
+                            geo.wNodes[p.assignedNode].load--;
+                        }
+                        if (p.state === 'moving_to_ram_recovery') {
+                            p.state = 'recovered';
+                            ramLoad = Math.max(0, ramLoad - (100 / (document.getElementById('vol-select').value * 0.2)));
+                            p.color = 'transparent'; // Hide it
+                        }
+                    } else {
+                        p.x = lerp(p.x, p.targetX, p.progress);
+                        p.y = lerp(p.y, p.targetY, p.progress);
+                    }
+                } else if (p.state === 'in_truck') {
+                    // Lock particles to truck movement
+                    p.y = truck.y + (Math.random()*20 - 10);
+                }
+            });
+
+            // Truck logic
+            if (truck.state === 'driving_up') {
+                truck.y -= 3;
+                if (truck.y <= geo.truckPath.endY) {
+                    truck.state = 'unloading';
+                    setTimeout(() => { truck.state = 'driving_down'; particles = particles.filter(p => p.type !== 'file'); }, 1000);
+                }
+            } else if (truck.state === 'driving_down') {
+                truck.y += 3;
+                if (truck.y >= geo.truckPath.startY) {
+                    truck.y = geo.truckPath.startY;
+                    truck.state = 'idle';
+                    truck.loaded = 0;
+                }
+            }
+        }
+
+        // Drawing Functions
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw Paths
+            ctx.strokeStyle = cols.boxBorder;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            
+            // GC Path
+            ctx.beginPath();
+            ctx.moveTo(geo.gcNode.x, geo.gcNode.y);
+            ctx.lineTo(geo.gcNode.x, geo.ram.y);
+            ctx.lineTo(geo.ram.x - geo.ram.w/2, geo.ram.y);
+            ctx.stroke();
+
+            ctx.setLineDash([]);
+
+            // Draw Entities
+            drawBox(geo.ram.x, geo.ram.y, geo.ram.w, geo.ram.h, geo.ram.label);
+            drawProgressBar(geo.ram.x, geo.ram.y + 15, geo.ram.w - 20, ramLoad, cols.source);
+
+            drawCloud(geo.cloudSrc.x, geo.cloudSrc.y, geo.cloudSrc.label);
+            drawCloud(geo.cloudDst.x, geo.cloudDst.y, geo.cloudDst.label);
+            
+            drawBox(geo.gcNode.x, geo.gcNode.y, geo.gcNode.w, geo.gcNode.h, geo.gcNode.label);
+
+            geo.mNodes.forEach(n => drawBox(n.x, n.y, n.w, n.h, n.label));
+            geo.wNodes.forEach((n, i) => {
+                // Check Overload
+                let isOverloaded = (document.getElementById('skew-select').value === 'on' && activeStep >= 2 && i === 0);
+                let borderCol = isOverloaded ? cols.waste : cols.boxBorder;
+                drawBox(n.x, n.y, n.w, n.h, n.label, borderCol);
+                if(isOverloaded) {
+                    ctx.fillStyle = cols.waste;
+                    ctx.font = '10px Arial';
+                    ctx.fillText('OOM RISK!', n.x - 25, n.y + 25);
+                }
+            });
+
+            // Draw Truck
+            drawTruck();
+
+            // Draw Particles
+            particles.forEach(p => {
+                if(p.color === 'transparent') return;
+                ctx.fillStyle = p.color;
+                if (p.type === 'file') {
+                    ctx.fillRect(p.x - 3, p.y - 3, 6, 6); // Square for files
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); // Circle for data/waste
+                    ctx.fill();
+                }
+            });
+        }
+
+        function drawBox(x, y, w, h, label, borderColor = cols.boxBorder) {
+            ctx.fillStyle = cols.boxBg;
+            ctx.strokeStyle = borderColor;
+            ctx.lineWidth = 1.5;
+            ctx.fillRect(x - w/2, y - h/2, w, h);
+            ctx.strokeRect(x - w/2, y - h/2, w, h);
+            
+            ctx.fillStyle = cols.text;
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x, y - h/2 - 8);
+        }
+
+        function drawProgressBar(x, y, w, pct, color) {
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(x - w/2, y, w, 6);
+            ctx.fillStyle = color;
+            ctx.fillRect(x - w/2, y, (w * pct) / 100, 6);
+        }
+
+        function drawCloud(x, y, label) {
+            ctx.fillStyle = cols.boxBg;
+            ctx.strokeStyle = cols.boxBorder;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y, 20, Math.PI * 0.5, Math.PI * 1.5);
+            ctx.arc(x + 20, y - 20, 30, Math.PI * 1, Math.PI * 2);
+            ctx.arc(x + 50, y, 20, Math.PI * 1.5, Math.PI * 0.5);
+            ctx.moveTo(x + 50, y + 20);
+            ctx.lineTo(x, y + 20);
+            ctx.fill(); ctx.stroke();
+            
+            ctx.fillStyle = cols.text;
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x + 25, y + 40);
+        }
+
+        function drawTruck() {
+            ctx.fillStyle = '#1e293b'; // Cab
+            ctx.fillRect(truck.x + 30, truck.y - 10, 20, 20);
+            ctx.fillStyle = 'rgba(255,255,255,0.05)'; // Container
+            ctx.strokeStyle = cols.boxBorder;
+            ctx.fillRect(truck.x - 40, truck.y - 20, 70, 30);
+            ctx.strokeRect(truck.x - 40, truck.y - 20, 70, 30);
+            
+            ctx.fillStyle = '#64748b'; // Wheels
+            ctx.beginPath(); ctx.arc(truck.x - 20, truck.y + 10, 6, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(truck.x + 40, truck.y + 10, 6, 0, Math.PI*2); ctx.fill();
+            
+            ctx.fillStyle = cols.text;
+            ctx.fillText('DLT', truck.x - 5, truck.y + 25);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        animate();
+    </script>
+</body>
+</html>
