@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture Simulator</title>
+    <style>
+        :root {
+            --bg-color: #fdfcf8;
+            --text-main: #1a2530;
+            --pastel-green: #d4edda;
+            --pastel-red: #f8d7da;
+            --pastel-orange: #ffeeba;
+            --pastel-purple: #e2d9f3;
+            --border-style: 2px dashed #1a2530;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+
+        /* Controls Panel */
+        .controls {
+            background: white;
+            padding: 20px;
+            border: var(--border-style);
+            border-radius: 8px;
+            box-shadow: 4px 4px 0px rgba(0,0,0,0.05);
+        }
+
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9em; }
+        .control-group input[type="range"] { width: 100%; }
+        .control-group select { width: 100%; padding: 5px; font-family: inherit; }
+        .val-display { float: right; font-weight: normal; color: #555; }
+
+        /* Simulator Board */
+        .board {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .layer {
+            padding: 15px;
+            border: 2px solid var(--text-main);
+            border-radius: 8px;
+            background: white;
+            position: relative;
+        }
+
+        .layer-title {
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-top: 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        /* Visual Nodes */
+        .node-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .worker-node {
+            flex: 1;
+            min-width: 80px;
+            border: 1px dashed var(--text-main);
+            padding: 10px;
+            border-radius: 4px;
+            background: var(--pastel-purple);
+            text-align: center;
+            font-size: 0.8em;
+        }
+
+        .memory-bar-bg {
+            width: 100%;
+            height: 10px;
+            background: white;
+            border: 1px solid #ccc;
+            margin-top: 5px;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .memory-bar-fill {
+            height: 100%;
+            background: #4caf50;
+            width: 0%;
+            transition: width 0.3s, background 0.3s;
+        }
+
+        /* Metrics & Status */
+        .metrics-panel {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-top: 5px;
+            color: var(--text-main);
+        }
+
+        .status-banner {
+            grid-column: 1 / -1;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            border-radius: 6px;
+            border: 2px solid;
+        }
+
+        .status-ok { background: var(--pastel-green); border-color: #28a745; }
+        .status-fail { background: var(--pastel-red); border-color: #dc3545; }
+
+        .layer-1 { background-color: #f8f9fa; }
+        .layer-2 { background-color: #fffdf5; }
+        .layer-3 { background-color: #fdf8f5; }
+    </style>
+</head>
+<body>
+
+    <h2>📐 Data Engineering Architecture Simulator</h2>
+
+    <div class="container">
+        
+        <div class="controls">
+            <h3>⚙️ Parameters</h3>
+            
+            <div class="control-group">
+                <label>Ingest Size (GB compressed) <span id="val-ingest" class="val-display">10</span></label>
+                <input type="range" id="input-ingest" min="1" max="50" value="10">
+            </div>
+
+            <div class="control-group">
+                <label>Expansion Factor <span id="val-expansion" class="val-display">15x</span></label>
+                <input type="range" id="input-expansion" min="1" max="20" value="15">
+            </div>
+
+            <div class="control-group">
+                <label>Worker Nodes <span id="val-nodes" class="val-display">1</span></label>
+                <input type="range" id="input-nodes" min="1" max="10" value="1">
+            </div>
+
+            <div class="control-group">
+                <label>Heap per Node (GB) <span id="val-heap" class="val-display">64</span></label>
+                <input type="range" id="input-heap" min="4" max="128" value="64" step="4">
+            </div>
+
+            <hr style="border: 1px dashed #ccc; margin: 15px 0;">
+
+            <div class="control-group">
+                <label>GC Type</label>
+                <select id="input-gc">
+                    <option value="G1GC">G1GC (Standard)</option>
+                    <option value="ZGC">ZGC (Low Latency)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Data Partitioning</label>
+                <select id="input-skew">
+                    <option value="balanced">Balanced (Optimal)</option>
+                    <option value="skewed">Skewed (Node 1 heavy)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="board">
+            
+            <div class="layer layer-1">
+                <h4 class="layer-title">[ Layer 1: Ingestion ]</h4>
+                <p style="margin:0; font-size: 0.9em;">📥 Pulling data from Cloud Source to Local Buffer.</p>
+                <div style="margin-top: 10px; font-weight: bold;">
+                    Total In-Memory Target: <span id="disp-total-uncompressed">150</span> GB
+                </div>
+            </div>
+
+            <div class="layer layer-2">
+                <h4 class="layer-title">[ Layer 2: Processing & GC ]</h4>
+                <p style="margin:0; font-size: 0.9em;">⚙️ Execution Block & Green Truck Loop (GC).</p>
+                <div class="node-container" id="node-container">
+                    </div>
+            </div>
+
+            <div class="layer layer-3">
+                <h4 class="layer-title">[ Layer 3: Egress ]</h4>
+                <p style="margin:0; font-size: 0.9em;">📤 Splitting active records and serializing to Parquet.</p>
+            </div>
+            
+        </div>
+
+        <div class="status-banner status-ok" id="status-banner">
+            🟢 SYSTEM STABLE: Pipeline processing efficiently.
+        </div>
+
+        <div class="metrics-panel">
+            <div class="metric-card">
+                <div>Cluster RAM Capacity</div>
+                <div class="metric-value" id="metric-ram">64 GB</div>
+            </div>
+            <div class="metric-card">
+                <div>Est. Throughput</div>
+                <div class="metric-value" id="metric-throughput">1.2 GB/s</div>
+            </div>
+            <div class="metric-card">
+                <div>GC STW Pause</div>
+                <div class="metric-value" id="metric-gc">250 ms</div>
+            </div>
+            <div class="metric-card">
+                <div>Pipeline Status</div>
+                <div class="metric-value" id="metric-status" style="color: #28a745;">PASS</div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // DOM Elements
+        const inputs = {
+            ingest: document.getElementById('input-ingest'),
+            expansion: document.getElementById('input-expansion'),
+            nodes: document.getElementById('input-nodes'),
+            heap: document.getElementById('input-heap'),
+            gc: document.getElementById('input-gc'),
+            skew: document.getElementById('input-skew')
+        };
+
+        const displays = {
+            ingest: document.getElementById('val-ingest'),
+            expansion: document.getElementById('val-expansion'),
+            nodes: document.getElementById('val-nodes'),
+            heap: document.getElementById('val-heap'),
+            totalUncompressed: document.getElementById('disp-total-uncompressed')
+        };
+
+        const metrics = {
+            ram: document.getElementById('metric-ram'),
+            throughput: document.getElementById('metric-throughput'),
+            gc: document.getElementById('metric-gc'),
+            status: document.getElementById('metric-status'),
+            banner: document.getElementById('status-banner')
+        };
+
+        const nodeContainer = document.getElementById('node-container');
+
+        // Main Simulation Logic
+        function updateSimulation() {
+            // Get values
+            const ingestGB = parseFloat(inputs.ingest.value);
+            const expFactor = parseFloat(inputs.expansion.value);
+            const nodesCount = parseInt(inputs.nodes.value);
+            const heapGB = parseFloat(inputs.heap.value);
+            const gcType = inputs.gc.value;
+            const isSkewed = inputs.skew.value === 'skewed';
+
+            // Update display labels
+            displays.ingest.innerText = ingestGB;
+            displays.expansion.innerText = expFactor + 'x';
+            displays.nodes.innerText = nodesCount;
+            displays.heap.innerText = heapGB;
+
+            // Math
+            const uncompressedTotal = ingestGB * expFactor;
+            const totalRam = nodesCount * heapGB;
+            displays.totalUncompressed.innerText = uncompressedTotal.toFixed(1);
+            metrics.ram.innerText = totalRam + " GB";
+
+            // Node Allocation & Memory Math
+            let oomFailure = false;
+            let oomNodeIndex = -1;
+            let maxMemoryUsagePct = 0;
+            
+            nodeContainer.innerHTML = ''; // Clear previous nodes
+
+            for(let i = 1; i <= nodesCount; i++) {
+                let dataForThisNode = 0;
+                
+                if (isSkewed) {
+                    if (i === 1) {
+                        dataForThisNode = uncompressedTotal * (nodesCount === 1 ? 1 : 0.85); // Node 1 gets 85% if skewed
+                    } else {
+                        dataForThisNode = (uncompressedTotal * 0.15) / (nodesCount - 1);
+                    }
+                } else {
+                    dataForThisNode = uncompressedTotal / nodesCount; // Balanced
+                }
+
+                const usagePct = (dataForThisNode / heapGB) * 100;
+                if (usagePct > maxMemoryUsagePct) maxMemoryUsagePct = usagePct;
+
+                let barColor = '#4caf50'; // Green
+                if (usagePct > 75) barColor = '#ffc107'; // Yellow
+                if (usagePct > 95) {
+                    barColor = '#f44336'; // Red
+                    oomFailure = true;
+                    if(oomNodeIndex === -1) oomNodeIndex = i;
+                }
+
+                // Render Node UI
+                const nodeDiv = document.createElement('div');
+                nodeDiv.className = 'worker-node';
+                nodeDiv.innerHTML = `
+                    <b>Node ${i}</b><br>
+                    ${dataForThisNode.toFixed(1)} GB
+                    <div class="memory-bar-bg">
+                        <div class="memory-bar-fill" style="width: ${Math.min(usagePct, 100)}%; background: ${barColor}"></div>
+                    </div>
+                `;
+                nodeContainer.appendChild(nodeDiv);
+            }
+
+            // GC Calculation
+            let gcPause = 0;
+            if (gcType === 'ZGC') {
+                gcPause = 5; // ZGC maxes around a few ms regardless of heap
+            } else {
+                // G1GC pause scales with heap size and memory pressure
+                gcPause = 50 + (heapGB * 1.5) + (maxMemoryUsagePct * 2.5); 
+            }
+
+            // Throughput Calculation
+            let throughput = nodesCount * 0.8; // Base processing
+            if (isSkewed) throughput = throughput * 0.3; // Skew destroys parallel throughput
+            if (gcPause > 300) throughput = throughput * 0.6; // High GC stalls throughput
+            if (oomFailure) throughput = 0;
+
+            // Update Metrics UI
+            metrics.throughput.innerText = throughput.toFixed(2) + " GB/s";
+            metrics.gc.innerText = Math.round(gcPause) + " ms";
+
+            // Status Banner Logic
+            if (oomFailure) {
+                metrics.status.innerText = "FAILED";
+                metrics.status.style.color = "#dc3545";
+                metrics.banner.className = "status-banner status-fail";
+                metrics.banner.innerHTML = `🚨 <b>OUT OF MEMORY (OOM) ERROR</b>: Node ${oomNodeIndex} exceeded heap capacity.<br>
+                <span style="font-weight:normal; font-size:0.9em;"><i>Fix: Increase Heap Size, add more Worker Nodes, or fix Data Skew to balance the load.</i></span>`;
+            } else if (isSkewed) {
+                metrics.status.innerText = "DEGRADED";
+                metrics.status.style.color = "#ffc107";
+                metrics.banner.className = "status-banner";
+                metrics.banner.style.backgroundColor = "#fff3cd";
+                metrics.banner.style.borderColor = "#ffc107";
+                metrics.banner.innerHTML = `⚠️ <b>DATA SKEW DETECTED</b>: Pipeline is running, but throughput is bottlenecked by Node 1.`;
+            } else if (maxMemoryUsagePct > 80) {
+                metrics.status.innerText = "WARNING";
+                metrics.status.style.color = "#ffc107";
+                metrics.banner.className = "status-banner";
+                metrics.banner.style.backgroundColor = "#fff3cd";
+                metrics.banner.style.borderColor = "#ffc107";
+                metrics.banner.innerHTML = `⚠️ <b>HIGH MEMORY PRESSURE</b>: Nodes are nearing heap limits. GC STW pauses may increase.`;
+            } else {
+                metrics.status.innerText = "PASS";
+                metrics.status.style.color = "#28a745";
+                metrics.banner.className = "status-banner status-ok";
+                metrics.banner.innerHTML = `🟢 <b>SYSTEM STABLE</b>: Processing architecture is properly provisioned.`;
+            }
+        }
+
+        // Attach Event Listeners
+        Object.values(inputs).forEach(input => {
+            input.addEventListener('input', updateSimulation);
+            input.addEventListener('change', updateSimulation);
+        });
+
+        // Initialize
+        updateSimulation();
+
+    </script>
+</body>
+</html>
