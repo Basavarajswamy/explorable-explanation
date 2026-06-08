@@ -8,7 +8,7 @@ This repository contains an **interactive, visual guide** to understanding data 
 
 ## 📋 Project Contents
 
-### 1. **Interactive HTML Simulator** (`gemini-code-1780926589111.html`)
+### 1. **Interactive HTML Simulator** (`version2.html`)
    A fully functional, browser-based Data Engineering Architecture Simulator that lets you:
    
    - **Adjust Parameters in Real-Time:**
@@ -69,14 +69,14 @@ A comprehensive, production-focused guide covering:
 ## 🚀 How to Use
 
 ### **Option 1: Open the Simulator Locally**
-1. Download `gemini-code-1780926589111.html`
+1. Download `version2.html`
 2. Open it directly in your browser (Chrome, Firefox, Safari, Edge)
 3. Start adjusting parameters and watching the simulation update in real-time
 
 ### **Option 2: Run via GitHub Pages** (Coming Soon)
 This repository can be hosted via GitHub Pages for easy online access:
 ```
-https://basavarajswamy.github.io/explorable-explanation/
+https://basavarajswamy.github.io/explorable-explanation/version2.html
 ```
 
 ### **Using the Simulator**
@@ -250,7 +250,7 @@ Have ideas to improve the simulator or documentation? Feel free to:
 
 For questions about the simulator, architecture concepts, or data engineering best practices:
 1. Check the **ARCHITECTURE.md** for detailed explanations
-2. Review the simulator's inline comments in **gemini-code-1780926589111.html**
+2. Review the simulator's inline comments in **version2.html**
 3. Open a GitHub issue with your question
 
 ---
@@ -259,7 +259,7 @@ For questions about the simulator, architecture concepts, or data engineering be
 
 | Task | Action |
 |------|--------|
-| **Try the simulator** | Open `gemini-code-1780926589111.html` in your browser |
+| **Try the simulator** | Open `version2.html` in your browser |
 | **Learn the theory** | Read `ARCHITECTURE.md` for detailed explanations |
 | **Understand failures** | Trigger OOM/skew scenarios in the simulator |
 | **Apply to real work** | Use insights to optimize your data pipelines |
